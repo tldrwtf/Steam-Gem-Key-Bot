@@ -4,11 +4,9 @@
 
 *********************************
 
-To Start the bot you have 2 options:
+double click start.bat - this will start the bot while keeping the console open -> Stop the bot by closing start.bat
+The Bot will also restart if any Issues happen
 
-double click start.bat - this will start the bot while keeping the console open (but bot may crash and not restart itself) -> Stop the bot by closing start.bat
-
-double click start forever.bat - this will start the bot while keeping the console closed (but bot will restart itself if it crashes) -> To stop the bot, double click stop.bat
 
 * If you want to make changes in the config (for example card rates), stop the bot, then go to config and make whatever changes you want, then start the bot again. 
 
@@ -19,3 +17,5 @@ double click start forever.bat - this will start the bot while keeping the conso
 ■ ■  CashApp : $mfwBan
 ■ ■  Dogecoin : A6vcbwZGpADw1ai9SekPFXDkVsGNJY45Py
 ■ ■  Litecoin : 34hn5T1rHCDn8x39HMgJWDjcXKVjsBoJvi
+
+■ ■ Modifications made in 2025 by killerboyyy777 (https://steamcommunity.com/id/klb777)
