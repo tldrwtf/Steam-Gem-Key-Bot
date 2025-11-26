@@ -3,6 +3,12 @@
   "version": "2.6.0",
   "description": "Trade BGs Emotes Keys Gems",
   "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "npm run build && npm start",
+    "start:legacy": "node index.js"
+  },
   "author": "https://steamcommunity.com/id/ndevs",
   "license": "ISC",
   "dependencies": {
@@ -17,8 +23,13 @@
     "system-sleep": "^1.3.6"
   },
   "devDependencies": {
+    "@types/lodash": "^4.17.21",
+    "@types/node": "^24.10.1",
+    "@typescript-eslint/eslint-plugin": "^5.62.0",
+    "@typescript-eslint/parser": "^5.62.0",
     "eslint": "^7.4.0",
     "eslint-config-airbnb-base": "^14.2.0",
-    "eslint-plugin-import": "^2.22.0"
+    "eslint-plugin-import": "^2.22.0",
+    "typescript": "^5.9.3"
   }
 }

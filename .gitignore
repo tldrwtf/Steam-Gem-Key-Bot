@@ -1,2 +1,13 @@
 node_modules/
 *.lock
+.claude/
+CLAUDE.md
+nul
+package-lock.json
+
+# TypeScript build output
+dist/
+
+# Sensitive data
+data/auth-tokens.json
+data/config.json
