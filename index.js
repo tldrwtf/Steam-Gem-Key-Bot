@@ -1,3 +1,15 @@
+var cluster = require('cluster');
+if (cluster.isMaster) {
+  cluster.fork();
+
+  cluster.on('exit', function(worker, code, signal) {
+    cluster.fork();
+  });
+}
+
+if (cluster.isWorker) {
+
+
 const SteamUser = require('steam-user');
 const SteamTotp = require('steam-totp');
 const TradeOfferManager = require('steam-tradeoffer-manager');
@@ -12,12 +24,92 @@ let userMsgs = {};
 
 function getTime() {
   const time = new Date();
-  const hours = time.getHours();
-  const minutes = time.getMinutes();
-  const seconds = time.getSeconds();
-  const result = `${hours}:${minutes}:${seconds}`;
-  return result;
+  const hours = String(time.getHours()).padStart(2, '0');
+  const minutes = String(time.getMinutes()).padStart(2, '0');
+  const seconds = String(time.getSeconds()).padStart(2, '0');
+  return `${hours}:${minutes}:${seconds}`;
 }
+async function autoGemItems() {
+  try {
+    console.log(`[${getTime()}] [AutoGem] Checking inventory for items to convert...`);
+
+    const sessionID = community.getSessionID();
+    if (!sessionID) {
+      console.log(`[${getTime()}] [AutoGem] No valid session ID yet, skipping.`);
+      return;
+    }
+
+    const inventory = await new Promise((resolve, reject) => {
+      community.getUserInventoryContents(client.steamID, 753, 6, true, (err, inv) => {
+        if (err) return reject(err);
+        resolve(inv || []);
+      });
+    });
+
+    if (inventory.length === 0) {
+      console.log(`[${getTime()}] [AutoGem] Inventory empty or unavailable.`);
+      return;
+    }
+
+    let gemmedCount = 0;
+
+    for (const item of inventory) {
+      const type = item.type?.toLowerCase() || '';
+      const name = item.market_hash_name?.toLowerCase() || '';
+
+      const isEmoteOrBG = type.includes('profile background') || type.includes('emoticon');
+      const skip =
+        type.includes('trading card') ||
+        name.includes('booster') ||
+        name.includes('gems');
+
+      if (isEmoteOrBG && !skip && Array.isArray(item.descriptions)) {
+        const gemInfo = item.descriptions.find(d => d.value?.includes('This item is worth:'));
+        if (gemInfo) {
+          const match = gemInfo.value.match(/(\d+)\s*Gems?/i);
+          if (match) {
+            const gemValue = parseInt(match[1]);
+
+            if (gemValue > CONFIG.Convert_To_Gems) {
+              console.log(`[${getTime()}] [AutoGem] Converting ${item.market_hash_name} (${gemValue} gems)...`);
+              gemmedCount++;
+
+              await new Promise((resolve) => {
+                community.httpRequestPost(
+                  {
+                    uri: 'https://steamcommunity.com/market/grindintogoo/',
+                    formData: {
+                      sessionid: sessionID,
+                      appid: String(item.appid),
+                      assetid: String(item.assetid),
+                      contextid: String(item.contextid),
+                    },
+                  },
+                  (err, res) => {
+                    if (err || res.statusCode !== 200) {
+                      console.log(
+                        `[${getTime()}] [AutoGem] Error converting ${item.market_hash_name}: ${err || res.statusCode}`
+                      );
+                    }
+                    resolve();
+                  }
+                );
+              });
+
+              await new Promise(r => setTimeout(r, 100));
+            }
+          }
+        }
+      }
+    }
+
+    console.log(`[${getTime()}] [AutoGem] Finished converting ${gemmedCount} items this run.`);
+  } catch (err) {
+    console.error(`[${getTime()}] [AutoGem] Error:`, err.message);
+  }
+}
+
+
 const client = new SteamUser();
 const manager = new TradeOfferManager({
   language: 'en',
@@ -32,25 +124,45 @@ setInterval(() => {
     if (userMsgs[Object.keys(userMsgs)[i]] > CONFIG.MAXMSGPERSEC) {
       client.chatMessage(
         Object.keys(userMsgs)[i],
-        "Sorry but we do not like spamming. You've been removed and blocked!",
+        "Sorry but we do not like spamming. You've been removed!",
       );
       client.removeFriend(Object.keys(userMsgs)[i]);
-      client.blockUser(Object.keys(userMsgs)[i]);
       for (let j = 0; j < CONFIG.Owner.length; j += 1) {
         client.chatMessage(
           CONFIG.Owner[j],
-          `Steam #${Object.keys(userMsgs)[i]} has been blocked for spamming`,
+          `Steam #${Object.keys(userMsgs)[i]} has been removed for spamming`,
         );
       }
     }
   }
   userMsgs = {};
 }, 1000);
+
+console.clear();
+console.log('\x1b[32m'+"///////////////////////////////////////////////////////////////////////////"+ '\x1b[0m');
+console.log('\x1b[31m'+"Copyright (C) 2025  killerboyyy777"+ '\x1b[0m');
+console.log('\x1b[31m'+"https://steamcommunity.com/id/klb777"+ '\x1b[0m');
+console.log('\x1b[32m'+"///////////////////////////////////////////////////////////////////////////"+ '\x1b[0m');
+console.log('\x1b[31m'+"777-steam-gem-tf2key-bot  Copyright (C) 2025  killerboyyy777"+ '\x1b[0m');
+console.log('\x1b[31m'+"This program comes with ABSOLUTELY NO WARRANTY"+ '\x1b[0m');
+console.log('\x1b[31m'+"This is free software, and you are welcome to redistribute it"+ '\x1b[0m');
+console.log('\x1b[31m'+"under certain conditions"+ '\x1b[0m');
+console.log('\x1b[31m'+"For more Information Check the LICENSE File."+ '\x1b[0m');
+console.log('\x1b[32m'+"///////////////////////////////////////////////////////////////////////////"+ '\x1b[0m');
+
+console.log("[DEBUG] Logging in with:", {
+  accountName: CONFIG.USERNAME,
+  password: CONFIG.PASSWORD ? "***" : "MISSING",
+  sharedSecret: CONFIG.SHAREDSECRET ? "OK" : "MISSING",
+SteamApiKey: CONFIG.STEAMAPIKEY ? "OK" : "MISSING",
+});
+
 client.logOn({
   accountName: CONFIG.USERNAME,
   password: CONFIG.PASSWORD,
   twoFactorCode: SteamTotp.getAuthCode(CONFIG.SHAREDSECRET),
 });
+
 client.on('loggedOn', () => {
   if (CONFIG.Owner[0]) {
     client.getPersonas([client.steamID], () => {
@@ -61,34 +173,48 @@ client.on('loggedOn', () => {
     client.logOff();
   }
 });
-client.on('webSession', (sessionID, cookies) => {
-  manager.setCookies(cookies, (err) => {
-    if (err) {
-      console.log('## An error occurred while setting cookies.');
-    }
-  });
+
+client.on('webSession', async (sessionID, cookies) => {
+  // Set Cookies
+  manager.setCookies(cookies);
+  community.setCookies(cookies);
+
+  // Start COnfirmation-Checker
+  community.startConfirmationChecker(15000, CONFIG.IDENTITYSECRET);
+
+  console.log(`[${getTime()}] [AutoGem] Starting initial AutoGem check...`);
+  await autoGemItems();
+
+  // Repeat Autogem once per Week
+  setInterval(() => {
+    console.log(`[${getTime()}] [AutoGem] Running weekly AutoGem check...`);
+    autoGemItems();
+  }, 7 * 24 * 60 * 60 * 1000); // 1 Woche
+
+  // Accept Friend Requests
   for (let i = 0; i < Object.keys(client.myFriends).length; i += 1) {
     if (client.myFriends[Object.keys(client.myFriends)[i]] == 2) {
       client.addFriend(Object.keys(client.myFriends)[i]);
     }
   }
-  community.setCookies(cookies);
-  community.startConfirmationChecker(15000, CONFIG.IDENTITYSECRET);
+
+  // Get Inventory and show Gems in playing Message
   manager.getInventoryContents(753, 6, true, (ERR, INV) => {
     if (ERR) {
-      console.log(ERR);
+      console.log(`[${getTime()}] [ERROR] Could not load inventory: ${ERR}`);
     } else {
       let My_gems = 0;
-      const MyGems = INV.filter((gem) => gem.name == 'Gems');
-      if (typeof MyGems[0] !== 'undefined') {
-        const gem = MyGems[0];
-        My_gems = gem.amount;
+      const MyGems = INV.filter((gem) => gem.name === 'Gems');
+      if (MyGems.length > 0) {
+        My_gems = MyGems[0].amount;
       }
-      const playThis = `${+My_gems} Gems > Buy/Sell Gems (!prices)`;
+
+      const playThis = `${My_gems} Gems > Buy/Sell Gems (!prices)`;
       client.gamesPlayed(playThis, true);
     }
   });
 });
+
 client.on('friendRelationship', (SENDER, REL) => {
   community.getSteamUser(SENDER, (err, user) => {
     if (err) {
@@ -238,27 +364,27 @@ client.on('friendMessage', (SENDER, MSG) => {
       } else if (MSG.toUpperCase() === '!PRICE') {
         client.chatMessage(
           SENDER,
-          `Sell Your: \r\n1 TF2 Key for Our ${CONFIG.Rates.SELL.TF2_To_Gems} Gems\r\n1 CS:GO Key for Our ${CONFIG.Rates.SELL.CSGO_To_Gems} Gems \r\n\r\nBuy Our: \r\n1 TF2 Key for Your ${CONFIG.Rates.BUY.Gems_To_TF2_Rate} Gems\r\n1 CS:GO Key for Your ${CONFIG.Rates.BUY.Gems_To_CSGO_Rate} Gems\r\n\r\nWe're also:\r\nBuying Your Backgrounds & emotes for ${CONFIG.Rates.BUY.BG_And_Emotes} Gems (Send offer & add correct number of my gems for auto accept.)\r\nSelling any of OUR Backgrounds & emotes for ${CONFIG.Rates.SELL.BG_And_Emotes} Gems (Send offer & add correct number of my gems for auto accept.)\r\n\r\nKey Swap Rates:\r\nYour ${CONFIG.Rates.Key_Swaps.TF2_To_CS[1]} CS:GO Keys for our ${CONFIG.Rates.Key_Swaps.TF2_To_CS[0]} TF2 Keys -> Use !SwapCS\r\nYour ${CONFIG.Rates.Key_Swaps.CS_To_TF2[1]} TF2 Keys for our ${CONFIG.Rates.Key_Swaps.CS_To_TF2[0]} CS:GO Keys -> Use !SwapTF`,
+          `Sell Your: \r\n1 TF2 Key for Our ${CONFIG.Rates.SELL.TF2_To_Gems} Gems\r\n\r\nBuy Our: \r\n1 TF2 Key for Your ${CONFIG.Rates.BUY.Gems_To_TF2_Rate} Gems\r\n\r\nWe're also:\r\nBuying Your Backgrounds & Emotes for ${CONFIG.Rates.BUY.BG_And_Emotes} Gems (Send offer & add correct number of my gems for auto accept.)\r\nSelling any of OUR Backgrounds & emotes for ${CONFIG.Rates.SELL.BG_And_Emotes} Gems (Send offer & add correct number of my gems for auto accept.)`,
         );
       } else if (MSG.toUpperCase() === '!RATE') {
         client.chatMessage(
           SENDER,
-          `Sell Your: \r\n1 TF2 Key for Our ${CONFIG.Rates.SELL.TF2_To_Gems} Gems\r\n1 CS:GO Key for Our ${CONFIG.Rates.SELL.CSGO_To_Gems} Gems \r\n\r\nBuy Our: \r\n1 TF2 Key for Your ${CONFIG.Rates.BUY.Gems_To_TF2_Rate} Gems\r\n1 CS:GO Key for Your ${CONFIG.Rates.BUY.Gems_To_CSGO_Rate} Gems\r\n\r\nWe're also:\r\nBuying Your Backgrounds & emotes for ${CONFIG.Rates.BUY.BG_And_Emotes} Gems (Send offer & add correct number of my gems for auto accept.)\r\nSelling any of OUR Backgrounds & emotes for ${CONFIG.Rates.SELL.BG_And_Emotes} Gems (Send offer & add correct number of my gems for auto accept.)\r\n\r\nKey Swap Rates:\r\nYour ${CONFIG.Rates.Key_Swaps.TF2_To_CS[1]} CS:GO Keys for our ${CONFIG.Rates.Key_Swaps.TF2_To_CS[0]} TF2 Keys -> Use !SwapCS\r\nYour ${CONFIG.Rates.Key_Swaps.CS_To_TF2[1]} TF2 Keys for our ${CONFIG.Rates.Key_Swaps.CS_To_TF2[0]} CS:GO Keys -> Use !SwapTF`,
+          `Sell Your: \r\n1 TF2 Key for Our ${CONFIG.Rates.SELL.TF2_To_Gems} Gems\r\n\r\nBuy Our: \r\n1 TF2 Key for Your ${CONFIG.Rates.BUY.Gems_To_TF2_Rate} Gems\r\n\r\nWe're also:\r\nBuying Your Backgrounds & emotes for ${CONFIG.Rates.BUY.BG_And_Emotes} Gems (Send offer & add correct number of my gems for auto accept.)\r\nSelling any of OUR Backgrounds & emotes for ${CONFIG.Rates.SELL.BG_And_Emotes} Gems (Send offer & add correct number of my gems for auto accept.)`,
         );
       } else if (MSG.toUpperCase() === '!RATES') {
         client.chatMessage(
           SENDER,
-          `Sell Your: \r\n1 TF2 Key for Our ${CONFIG.Rates.SELL.TF2_To_Gems} Gems\r\n1 CS:GO Key for Our ${CONFIG.Rates.SELL.CSGO_To_Gems} Gems \r\n\r\nBuy Our: \r\n1 TF2 Key for Your ${CONFIG.Rates.BUY.Gems_To_TF2_Rate} Gems\r\n1 CS:GO Key for Your ${CONFIG.Rates.BUY.Gems_To_CSGO_Rate} Gems\r\n\r\nWe're also:\r\nBuying Your Backgrounds & emotes for ${CONFIG.Rates.BUY.BG_And_Emotes} Gems (Send offer & add correct number of my gems for auto accept.)\r\nSelling any of OUR Backgrounds & emotes for ${CONFIG.Rates.SELL.BG_And_Emotes} Gems (Send offer & add correct number of my gems for auto accept.)\r\n\r\nKey Swap Rates:\r\nYour ${CONFIG.Rates.Key_Swaps.TF2_To_CS[1]} CS:GO Keys for our ${CONFIG.Rates.Key_Swaps.TF2_To_CS[0]} TF2 Keys -> Use !SwapCS\r\nYour ${CONFIG.Rates.Key_Swaps.CS_To_TF2[1]} TF2 Keys for our ${CONFIG.Rates.Key_Swaps.CS_To_TF2[0]} CS:GO Keys -> Use !SwapTF`,
+          `Sell Your: \r\n1 TF2 Key for Our ${CONFIG.Rates.SELL.TF2_To_Gems} Gems\r\n\r\nBuy Our: \r\n1 TF2 Key for Your ${CONFIG.Rates.BUY.Gems_To_TF2_Rate} Gems\r\n\r\nWe're also:\r\nBuying Your Backgrounds & emotes for ${CONFIG.Rates.BUY.BG_And_Emotes} Gems (Send offer & add correct number of my gems for auto accept.)\r\nSelling any of OUR Backgrounds & emotes for ${CONFIG.Rates.SELL.BG_And_Emotes} Gems (Send offer & add correct number of my gems for auto accept.)`,
         );
       } else if (MSG.toUpperCase() === '!PRICES') {
         client.chatMessage(
           SENDER,
-          `Sell Your: \r\n1 TF2 Key for Our ${CONFIG.Rates.SELL.TF2_To_Gems} Gems\r\n1 CS:GO Key for Our ${CONFIG.Rates.SELL.CSGO_To_Gems} Gems \r\n\r\nBuy Our: \r\n1 TF2 Key for Your ${CONFIG.Rates.BUY.Gems_To_TF2_Rate} Gems\r\n1 CS:GO Key for Your ${CONFIG.Rates.BUY.Gems_To_CSGO_Rate} Gems\r\n\r\nWe're also:\r\nBuying Your Backgrounds & emotes for ${CONFIG.Rates.BUY.BG_And_Emotes} Gems (Send offer & add correct number of my gems for auto accept.)\r\nSelling any of OUR Backgrounds & emotes for ${CONFIG.Rates.SELL.BG_And_Emotes} Gems (Send offer & add correct number of my gems for auto accept.)\r\n\r\nKey Swap Rates:\r\nYour ${CONFIG.Rates.Key_Swaps.TF2_To_CS[1]} CS:GO Keys for our ${CONFIG.Rates.Key_Swaps.TF2_To_CS[0]} TF2 Keys -> Use !SwapCS\r\nYour ${CONFIG.Rates.Key_Swaps.CS_To_TF2[1]} TF2 Keys for our ${CONFIG.Rates.Key_Swaps.CS_To_TF2[0]} CS:GO Keys -> Use !SwapTF`,
+          `Sell Your: \r\n1 TF2 Key for Our ${CONFIG.Rates.SELL.TF2_To_Gems} Gems\r\n\r\nBuy Our: \r\n1 TF2 Key for Your ${CONFIG.Rates.BUY.Gems_To_TF2_Rate} Gems\r\n\r\nWe're also:\r\nBuying Your Backgrounds & emotes for ${CONFIG.Rates.BUY.BG_And_Emotes} Gems (Send offer & add correct number of my gems for auto accept.)\r\nSelling any of OUR Backgrounds & emotes for ${CONFIG.Rates.SELL.BG_And_Emotes} Gems (Send offer & add correct number of my gems for auto accept.)`,
         );
       } else if (MSG.toUpperCase() == '!INFO') {
         client.chatMessage(
           SENDER,
-          'Coded By: https://steamcommunity.com/id/mfwBan/',
+          `Bot owned by https://steamcommunity.com/id/klb777\r\n1 Use !help to see all Commands`,
         );
       } else if (MSG.toUpperCase() === '!CHECK') {
         let theirTF2 = 0;
@@ -317,7 +443,7 @@ client.on('friendMessage', (SENDER, MSG) => {
                   }
                   client.chatMessage(
                     SENDER,
-                    `You have:\r\n\r\n${theirTF2}TF2 Keys\r\n${TF2_Msg} You have this many Gems ${theirGems} Gems ${Gems_Msg}`,
+                    `You have:\r\n\r\n${theirTF2}TF2 Keys\r\n${TF2_Msg} You have:\r\n\r\n${theirGems} Gems ${Gems_Msg}`,
                   );
                 }
               },
@@ -346,8 +472,6 @@ client.on('friendMessage', (SENDER, MSG) => {
                   SENDER,
                   `You Requested To Sell Your ${n} CS:GO Keys for My ${Amount_of_Gems} Gems`,
                 );
-                sleep(1500);
-                client.chatMessage(SENDER, 'AI initiating...');
                 sleep(1500);
                 client.chatMessage(SENDER, 'Trade Processing');
                 sleep(1500);
@@ -494,8 +618,6 @@ client.on('friendMessage', (SENDER, MSG) => {
                   SENDER,
                   `You Requested To Swap Your ${n} TF2 Keys for My ${My_CSGO} CS:GO Keys (${CONFIG.Rates.Key_Swaps.CS_To_TF2[1]} / ${CONFIG.Rates.Key_Swaps.CS_To_TF2[0]}) Rate`,
                 );
-                sleep(1500);
-                client.chatMessage(SENDER, 'AI initiating...');
                 sleep(1500);
                 client.chatMessage(SENDER, 'Trade Processing');
                 sleep(1500);
@@ -644,8 +766,6 @@ client.on('friendMessage', (SENDER, MSG) => {
                   `You Requested To Swap Your ${n} CS:GO Keys for My ${My_TF2} TF2 Keys (${CONFIG.Rates.Key_Swaps.TF2_To_CS[1]} / ${CONFIG.Rates.Key_Swaps.TF2_To_CS[0]}) Rate`,
                 );
                 sleep(1500);
-                client.chatMessage(SENDER, 'AI initiating...');
-                sleep(1500);
                 client.chatMessage(SENDER, 'Trade Processing');
                 sleep(1500);
                 client.chatMessage(SENDER, 'Please hold...');
@@ -788,8 +908,6 @@ client.on('friendMessage', (SENDER, MSG) => {
                   SENDER,
                   `You Requested To Buy My ${n} TF2 Keys for your ${Amount_of_Gems} Gems`,
                 );
-                sleep(1500);
-                client.chatMessage(SENDER, 'AI initiating...');
                 sleep(1500);
                 client.chatMessage(SENDER, 'Trade Processing');
                 sleep(1500);
@@ -937,8 +1055,6 @@ client.on('friendMessage', (SENDER, MSG) => {
                   SENDER,
                   `You Requested To Buy My ${n} CS:GO Keys for your ${Amount_of_Gems} Gems`,
                 );
-                sleep(1500);
-                client.chatMessage(SENDER, 'AI initiating...');
                 sleep(1500);
                 client.chatMessage(SENDER, 'Trade Processing');
                 sleep(1500);
@@ -1090,8 +1206,6 @@ client.on('friendMessage', (SENDER, MSG) => {
                   SENDER,
                   `You Requested To Sell Your ${n} TF2 Keys for My ${Amount_of_Gems} Gems`,
                 );
-                sleep(1500);
-                client.chatMessage(SENDER, 'AI initiating...');
                 sleep(1500);
                 client.chatMessage(SENDER, 'Trade Processing');
                 sleep(1500);
@@ -1475,17 +1589,16 @@ function Sell_Bgs_And_Emotes(offer) {
       });
     } else {
       const gem = TheirGems[0];
-      if (gem.amount == Price_In_Gems) {
+      if (gem.amount >= Price_In_Gems) {
         const Database = JSON.parse(
           fs
             .readFileSync('./SETTINGS/TotalSold.json')
             .toString('utf8'),
         );
-        Database.Profit.Sell.CRAP[0]
-          += MyItems.length * (CONFIG.Rates.SELL.BG_And_Emotes - 10);
+        Database.Profit.Sell.CRAP[0] += gem.amount - (MyItems.length * CONFIG.Rates.BUY.BG_And_Emotes);
         fs.writeFileSync(
           './SETTINGS/TotalSold.json',
-          JSON.stringify(Database, undefined, '\t'),
+          JSON.stringify(Database, undefined, '\t')
         );
         offer.accept((err) => {
           client.chatMessage(
@@ -1511,7 +1624,7 @@ function Sell_Bgs_And_Emotes(offer) {
         // Not enough gems,decline
         client.chatMessage(
           PartnerID,
-          'Rates are incorrect. Please retry using the correct rates.',
+                    `Rates are incorrect. You offered ${gem.amount} Gems but this trade requires ${MyItems.length * CONFIG.Rates.SELL.BG_And_Emotes} Gems (${MyItems.length} item(s) × ${CONFIG.Rates.SELL.BG_And_Emotes} Gems each). Please retry using the correct rates.`,
         );
         offer.decline((err) => {
           if (err) {
@@ -1523,7 +1636,7 @@ function Sell_Bgs_And_Emotes(offer) {
   } else {
     client.chatMessage(
       PartnerID,
-      'Sorry, Cloudbank is not for sale. Try again please with other items!',
+      'Sorry, One or more of the Items are not for sale. Try again please with other items!',
     );
     offer.decline((err) => {
       console.log(
@@ -1565,15 +1678,13 @@ function Buy_Bgs_And_Emotes(offer) {
       });
     } else {
       const gem = MyGems[0];
-      if (gem.amount == Price_In_Gems) {
+      if (gem.amount <= Price_In_Gems) {
         const Database = JSON.parse(
           fs
             .readFileSync('./SETTINGS/TotalSold.json')
             .toString('utf8'),
         );
-        Database.Profit.Buy.CRAP[0]
-          += TheirItems.length
-          * (CONFIG.Rates.SELL.BG_And_Emotes - CONFIG.Rates.BUY.BG_And_Emotes);
+	Database.Profit.Buy.CRAP[0] += TheirItems.length * (CONFIG.Rates.SELL.BG_And_Emotes - CONFIG.Rates.BUY.BG_And_Emotes) + (Price_In_Gems - gem.amount);
         fs.writeFileSync(
           './SETTINGS/TotalSold.json',
           JSON.stringify(Database, undefined, '\t'),
@@ -1602,7 +1713,7 @@ function Buy_Bgs_And_Emotes(offer) {
       } else {
         client.chatMessage(
           PartnerID,
-          "You're trying to take something that aren't gems alone / The rates may be incorrect. Please try again.",
+          "You're trying to take something that aren't gems alone or/and too much Gems. Please try again.",
         );
         offer.decline((err) => {
           if (err) {
@@ -1626,4 +1737,6 @@ function Buy_Bgs_And_Emotes(offer) {
       }
     });
   }
+}
+
 }
